@@ -1,0 +1,79 @@
+import math
+import cv2
+import time
+import handTrackingModule as htm
+import numpy as np
+
+from comtypes import CLSCTX_ALL
+from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+
+#######################################################
+camHeight = 640
+camWidth = 480
+#######################################################
+
+
+def main():
+    devices = AudioUtilities.GetSpeakers()
+    interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+    volume = interface.QueryInterface(IAudioEndpointVolume)
+
+    volRange = volume.GetVolumeRange()
+
+    minVol = volRange[0]
+    maxVol = volRange[1]
+
+    cTime = 0
+    pTime = 0
+
+    cap = cv2.VideoCapture(0)
+    cap.set(3, camHeight)
+    cap.set(4, camWidth)
+
+    detector = htm.handTracker(detectionConf=0.7)
+
+    vol = 0
+    volBar = 400
+    volPer = 0
+
+    while True:
+        success, img = cap.read()
+        img = detector.findHands(img)
+        landmarksList = detector.findPosition(img, draw=False)
+
+        if len(landmarksList):
+            thumb_X, thumb_Y = landmarksList[4][1], landmarksList[4][2]
+            index_X, index_Y = landmarksList[8][1], landmarksList[8][2]
+            center_X, center_Y = (thumb_X + index_X) // 2, (thumb_Y + index_Y) // 2
+
+            cv2.circle(img, (thumb_X, thumb_Y), 8, (255, 0, 0), cv2.FILLED)
+            cv2.circle(img, (index_X, index_Y), 8, (255, 0, 0), cv2.FILLED)
+            cv2.line(img, (thumb_X, thumb_Y), (index_X, index_Y), (255, 0, 255), 3)
+            cv2.circle(img, (center_X, center_Y), 8, (255, 0, 0), cv2.FILLED)
+
+            line_len = math.hypot(thumb_X - index_X , thumb_Y - index_Y)
+
+            if line_len < 30:
+                cv2.circle(img, (center_X, center_Y), 8, (0, 255, 0), cv2.FILLED)
+
+            vol = np.interp(line_len, [30, 250], [minVol, maxVol])
+            volBar = np.interp(line_len, [30, 250], [400, 150])
+            volPer = np.interp(line_len, [30, 250], [0, 100])
+
+            volume.SetMasterVolumeLevel(vol, None)
+
+        cv2.rectangle(img, (50, 150), (85, 400), (255, 0, 0), 3)
+        cv2.rectangle(img, (50, int(volBar)), (85, 400), (255, 0, 0), cv2.FILLED)
+        cv2.putText(img, f'{str(int(volPer))} %', (50, 430), cv2.FONT_HERSHEY_PLAIN, 1, (255, 0, 0), 2)
+
+        cTime = time.time()
+        fps = 1/(cTime-pTime)
+        pTime = cTime
+
+        cv2.putText(img, f'FPS: {str(int(fps))}', (5, 70), cv2.FONT_HERSHEY_PLAIN, 1, (255, 0, 0), 2)
+
+        cv2.imshow("Image", img)
+        cv2.waitKey(1)
+
+if __name__ == "__main__":
+    main()
